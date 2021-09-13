@@ -1,0 +1,337 @@
+---
+title: "Final Project - Muhammad Irsyad"
+author: "Muhammad Irsyad"
+date: "8/30/2021"
+output: html_document
+---
+#Business Question - Customer Segmentation
+1. How about group age in the data?
+2. How about education level in the data?
+3. How about marital status in the data?
+4. How many people have children?
+5. How about purchase by places?
+6. How about clustering through Total Amount and Purchase Place?
+
+
+#Load Libraries
+```{r}
+library(readr)
+library(ggplot2)
+library(tidyverse)
+library(visdat)
+library(tidyr)
+library(assertive)
+library(scales)
+library(dplyr)
+
+#Kmeans Package
+library(cluster)
+library(factoextra)
+```
+
+#Read Dataset
+```{r}
+data <- read_csv("marketing_data.csv")
+desc(data)
+```
+
+#Data Cleansing & Data Manipulation
+```{r}
+#Handling Missing Value
+#Count Missing Value
+sum(is.na(data))
+
+#Visualization Missing Value
+missing.values <- data %>%
+    gather(key = "key", value = "val") %>%
+    mutate(is.missing = is.na(val)) %>%
+    group_by(key, is.missing) %>%
+    summarise(num.missing = n()) %>%
+    filter(is.missing==T) %>%
+    select(-is.missing) %>%
+    arrange(desc(num.missing))
+
+#Visualization Total Missing Value
+missing.values %>%
+  ggplot() +
+    geom_bar(aes(x=key, y=num.missing), stat = 'identity') +
+    labs(x='variable', y="number of missing values", title='Total Missing Value') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Drop Missing Value
+data <- na.omit(data)
+```
+
+```{r}
+#Handling Outliers
+unselect <- c("ID", "Income", "Education","Marital_Status", "Dt_Customer", "Country")
+
+outliers <- data %>%
+  select(-unselect)
+
+outliers <- outliers %>%
+  gather(variable,values,1:22)
+
+#Plot Outliers unless Char
+outliers %>% 
+  ggplot()+
+  geom_boxplot(aes(x=variable,y=values)) + 
+  facet_wrap(~variable,ncol=,scales="free") + 
+  theme(strip.text.x = element_blank(),
+        text = element_text(size=9))
+```
+
+
+```{r}
+#Outliers at year_birth is looks abnormal. Some data are year of birth 1890
+#Plot outliers year_birth
+data %>%
+  ggplot(aes(x = Year_Birth)) +
+  geom_boxplot()
+```
+
+```{r}
+#Use data with Year Birth > 1920
+data <- data %>%
+  filter(Year_Birth > 1920)
+```
+
+```{r}
+#Handling Data Type
+#Convert DT_customer to date type
+data$Dt_Customer <- as.Date(data$Dt_Customer, "%m/%d/%y")
+
+#Converting Income as Numeric
+data$Income <- parse_number(data$Income)
+
+str(data)
+```
+
+
+```{r}
+#Handling Data Type
+#Unique Value
+unique(data$Marital_Status)
+
+#Merge unique value Marital Status
+data$Marital_Status[data$Marital_Status == "YOLO" |
+                              data$Marital_Status == "Absurd" |
+                              data$Marital_Status == "Alone"] <- "Single"
+
+#New Column for Age
+df <- data %>%
+  mutate(Age = 2021 - Year_Birth)
+
+#Groupping Age
+df <- df %>%
+  mutate(age_group = case_when(
+    Age <= 30 ~ "young_adults",
+    Age > 30 & Age < 40 ~ "adults",
+    Age >= 40 & Age < 60 ~ "middle_age",
+    Age >= 60 ~ "old_age"
+  ))
+
+#New Column for Total Kids = Kidhome + Teenhome
+df <- df %>%
+  mutate(TotalKids = Kidhome + Teenhome)
+
+#New Column for Total Spending = Amount variable (Mnt Variable)
+df <- df %>%
+  mutate(TotalSpent = MntWines + MntFruits + MntMeatProducts + MntFishProducts + MntSweetProducts + MntGoldProds)
+
+#Handling Categorical data
+df$Marital_Status <- as.factor(df$Marital_Status)
+df$Education <- as.factor(df$Education)
+df$age_group <- as.factor(df$age_group)
+df$Country <- as.factor(df$Country)
+```
+
+```{r}
+str(df)
+```
+
+#Exploring the data
+```{r}
+#Plot - Age Segmentation
+df %>%
+    count(age_group) %>%
+    ggplot(aes(x = age_group, y = n, fill = age_group)) +
+    geom_col() +
+    labs(title = "Segmentation by Age", x = 'Age Group', y = 'Total') +
+    scale_fill_discrete(name = "Age Group", labels = c("30 - 40 years old", "40 - 60 years old","> 60 years old","< 30 years old"))
+
+```
+
+```{r}
+#Plot - Total Education
+df %>% 
+  ggplot(aes(x = Education, fill = Education)) +
+  geom_bar() +
+  labs(title = "Segmentation by Education", y = "Total") +
+  theme(legend.position = "none")
+```
+
+```{r}
+#Plot - Total Marital
+df %>%
+  ggplot(aes(x = Marital_Status, fill = Marital_Status)) +
+  geom_bar() +
+  labs(title = "Segmentation by Marital Status", y = "Total") +
+  theme(legend.position = "none")
+```
+
+```{r}
+#Plot - Total Kids
+df %>%
+  ggplot(aes(x = TotalKids, fill = TotalKids)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Segmentation by Total Children", x = "Children", y = "Total")
+```
+```{r}
+#Plot - Total Country
+df %>%
+  ggplot(aes(x = Country, fill = Country)) +
+  geom_bar() +
+  labs(title = "Segmentation by Country", y = "Total") +
+  scale_fill_discrete(name = "Country", labels = c("Australia", "Canada", "Germany", "India", "Montenegro", "South Africa" ,"Spain", "United States"))
+```
+
+```{r}
+#Plot - Total Purchase by places
+Numberpurchase <- c('NumStorePurchases', 'NumWebPurchases', 'NumCatalogPurchases')
+
+Catalog <- sum(df$NumCatalogPurchases)
+Store <- sum(df$NumStorePurchases)
+Web <- sum(df$NumWebPurchases)
+
+Table_purchase <- c(Catalog, Store, Web) 
+names(Table_purchase) <- c("Catalog", "Store", "Web")
+Table_purchase <- as.data.frame(Table_purchase)
+
+Table_purchase %>%
+  ggplot(aes(x = c("Catalog", "Store", "Web"), y = Table_purchase, fill = c("Catalog", "Store", "Web"))) +
+  geom_col() +
+  labs(
+       x = "Category Purchases",
+       y = "Total Purchase") +
+  theme(legend.position = "none")
+```
+
+#Data Preprocessing 
+```{r}
+#Select Numeric Data for K Means
+numeric_data <- df %>%
+                select(-c("AcceptedCmp1", "AcceptedCmp2","AcceptedCmp3","AcceptedCmp4","AcceptedCmp5",
+                          "Recency","Complain","ID", "Response", "Year_Birth", 
+                          "TotalSpent", "Dt_Customer", "TotalKids", "Country"))
+```
+
+#K Means - Total Amount
+```{r}
+#Assign by amount of items
+numeric_data_k2 <- numeric_data %>%
+  select(c(MntWines, MntFruits, MntMeatProducts, MntFishProducts, MntSweetProducts, MntGoldProds))
+```
+
+```{r}
+#Scaling the data
+numeric_data_k2 <- scale(numeric_data_k2)
+head(numeric_data_k2)
+```
+
+```{r}
+# K- Means with Elbow Method
+#Best K = 2
+fviz_nbclust(numeric_data_k2, kmeans, method = 'wss')
+```
+
+```{r}
+#K - Means with Silhoutte Method
+#K = 2
+fviz_nbclust(numeric_data_k2, kmeans, method = 'silhouette')
+```
+
+```{r}
+#K - Means with Gap Stat Method
+# K = 3
+fviz_nbclust(numeric_data_k2, kmeans, method = 'gap_stat')
+```
+
+```{r}
+#The best k is 2, because result of 2 methods is 2
+k_amount_2 = kmeans(numeric_data_k2, centers = 2, nstart = 50)
+#Plot k means
+fviz_cluster(k_amount_2, data = numeric_data_k2)
+```
+
+```{r}
+#Clustering in table
+k_amount_2_table = data.frame(numeric_data_k2,k_amount_2$cluster)
+view(k_amount_2_table)
+
+#Viewing description data after clustering
+numeric_data[, 6:11] %>%
+  mutate(cluster = k_amount_2_table$k_amount_2.cluster) %>%
+  group_by(cluster) %>%
+  summarise_all("mean")
+```
+
+#K Means - Purchase by places
+```{r}
+#Assign by places purchase
+numeric_data_k3 <- numeric_data %>%
+  select(c(NumWebPurchases, NumCatalogPurchases, NumStorePurchases))
+```
+
+```{r}
+#Scaling the data
+numeric_data_k3 <- scale(numeric_data_k3)
+head(numeric_data_k3)
+```
+
+```{r}
+#K - Means with Elbow Method
+#Best K = 2
+fviz_nbclust(numeric_data_k3, kmeans, method = 'wss')
+```
+
+```{r}
+#K - Means with silhouette method
+#Best K = 2
+fviz_nbclust(numeric_data_k3, kmeans, method = 'silhouette')
+```
+```{r}
+#K - Means with Gap Stat Method
+#Best K = 4
+fviz_nbclust(numeric_data_k3, kmeans, method = 'gap_stat')
+```
+```{r}
+#The result for k is 2, because result of 2 methods is 2
+k_place_3 = kmeans(numeric_data_k3, centers = 2, nstart = 50)
+k_place_3
+
+#Plot k means - Purchase by places
+fviz_cluster(k_place_3, data = numeric_data_k3)
+```
+```{r}
+#Clustering in table
+k_place_3_table = data.frame(numeric_data_k3,k_place_3$cluster)
+view(k_place_3_table)
+
+#Viewing description data after clustering
+numeric_data[, 13:15] %>%
+  mutate(cluster = k_place_3_table$k_place_3.cluster) %>%
+  group_by(cluster) %>%
+  summarise_all("mean")
+```
+
+#Recommendation
+After modelling with K-Means and the result is :
+1. Amoount of categories item
+- Cluster 1 different almost 80% from Cluster 2. Cluster 1 should make promotion with discount or bundle package for all items, also give some product knowledge
+that sell it in offline or online store
+
+2. Purchase by places
+- Cluster 1 different almost 75% from Cluster 2. So, cluster 1 have to make an advertisement or promotion through online or offline store.
+For web or catalog, can make voucher for several products, or make a campaign to increase the purchase value
+for offline store, can make promotion like buy 1 get 1 products.
